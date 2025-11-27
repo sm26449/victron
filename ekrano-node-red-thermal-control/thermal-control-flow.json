@@ -1,0 +1,612 @@
+[
+    {
+        "id": "11ab37b1755e53ac",
+        "type": "tab",
+        "label": "Thermal Control Simplified",
+        "disabled": false,
+        "info": "Simplified thermal control with essential monitoring\nBattery: 22.5-26.5°C (target 24.5°C)\nRoom: 20-26°C\nWith outdoor sensor for heat loss compensation"
+    },
+    {
+        "id": "36fbd0cf5d23e911",
+        "type": "inject",
+        "z": "11ab37b1755e53ac",
+        "name": "Initialize on Deploy",
+        "props": [
+            {
+                "p": "payload"
+            }
+        ],
+        "repeat": "",
+        "crontab": "",
+        "once": true,
+        "onceDelay": "0.1",
+        "topic": "",
+        "payload": "",
+        "payloadType": "date",
+        "x": 150,
+        "y": 60,
+        "wires": [
+            [
+                "bc53df9fcffeefa5"
+            ]
+        ]
+    },
+    {
+        "id": "bc53df9fcffeefa5",
+        "type": "function",
+        "z": "11ab37b1755e53ac",
+        "name": "📋 Set Configuration",
+        "func": "// ============================================\n// THERMAL CONTROL CONFIGURATION\n// ============================================\n// \n// IMPORTANT: Replace all YOUR_* placeholders with your actual values\n// See README.md for configuration instructions\n//\n\nglobal.set('thermal_config', {\n    // Temperature limits\n    battery: {\n        target: 24.5,\n        tolerance: 2,        // ±2°C (22.5-26.5)\n        critical_hot: 30,\n        critical_cold: 18,\n        warning_hot: 28,\n        warning_cold: 20\n    },\n    \n    room: {\n        min: 20,\n        max: 26,\n        comfort: 23\n    },\n    \n    // Heat loss compensation\n    heat_loss: {\n        enabled: true,\n        threshold_diff: 10,  // If outside is 10°C colder\n        fan_boost: true\n    },\n    \n    // AC control\n    ac: {\n        min_cycle_minutes: 10,\n        debounce_seconds: 5\n    },\n    \n    // AC device (Tuya-based)\n    // Get these values from your Tuya IoT Platform account\n    ac_device: {\n        device_id: 'YOUR_TUYA_DEVICE_ID',\n        ip: 'YOUR_AC_LOCAL_IP',\n        local_key: 'YOUR_TUYA_LOCAL_KEY',\n        version: '3.3'\n    },\n    \n    // Tuya Bridge API URL\n    bridge_url: 'http://YOUR_BRIDGE_IP:8080',\n    \n    // Monitoring\n    sensor_timeout_minutes: 5,\n    bridge_timeout_seconds: 10,\n    \n    // Telegram Notifications (optional)\n    telegram: {\n        enabled: true,\n        bot_token: 'YOUR_TELEGRAM_BOT_TOKEN',\n        chat_id: 'YOUR_TELEGRAM_CHAT_ID',\n        notify_critical: true,\n        notify_state_changes: true,\n        notify_bridge_errors: true,\n        min_repeat_minutes: 30\n    }\n});\n\n// Initialize runtime state\nflow.set('thermal_state', {\n    lastMode: null,\n    lastAction: null,\n    lastChange: 0,\n    lastCommand: 0,\n    lastNotification: {}\n});\n\nflow.set('bridge_state', {\n    failures: 0,\n    lastSuccess: Date.now()\n});\n\nnode.status({ \n    fill: 'green', \n    shape: 'dot', \n    text: '✅ Configuration loaded' \n});\n\nnode.warn('========================================');\nnode.warn('  THERMAL CONTROL INITIALIZED');\nnode.warn('  Battery: 22.5-26.5°C (target 24.5°C)');\nnode.warn('  Room: 20-26°C');\nnode.warn('  Outdoor sensor: ENABLED');\nnode.warn('========================================');\n\nreturn msg;",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 390,
+        "y": 60,
+        "wires": [
+            []
+        ]
+    },
+    {
+        "id": "1e0436d5a3fb7f52",
+        "type": "inject",
+        "z": "11ab37b1755e53ac",
+        "name": "⏰ Check Every 2 Minutes",
+        "props": [],
+        "repeat": "120",
+        "crontab": "",
+        "once": true,
+        "onceDelay": "5",
+        "topic": "",
+        "x": 180,
+        "y": 140,
+        "wires": [
+            [
+                "9b98dc87466c91dd"
+            ]
+        ]
+    },
+    {
+        "id": "9b98dc87466c91dd",
+        "type": "function",
+        "z": "11ab37b1755e53ac",
+        "name": "📡 Get AC Status",
+        "func": "// ============================================\n// GET AC STATUS - With Bridge Monitoring\n// ============================================\n\nconst config = global.get('thermal_config');\nconst bridgeState = flow.get('bridge_state') || { failures: 0, lastSuccess: 0 };\nconst now = Date.now();\n\nif (!config) {\n    node.status({ fill: 'red', shape: 'ring', text: '❌ No config!' });\n    return null;\n}\n\n// Check if bridge is responding\nif (bridgeState.failures >= 3 && (now - bridgeState.lastSuccess) < 300000) {\n    const minutesSinceSuccess = ((now - bridgeState.lastSuccess) / 60000).toFixed(1);\n    node.status({ \n        fill: 'red', \n        shape: 'ring', \n        text: `🔴 Bridge down (${bridgeState.failures} fails, ${minutesSinceSuccess}min)` \n    });\n    \n    // Send notification every 3rd failure\n    if (bridgeState.failures === 3 || bridgeState.failures % 10 === 0) {\n        const telegramMsg = {\n            payload: {\n                chatId: config.telegram.chat_id,\n                type: 'message',\n                content: `⚠️ BRIDGE API DOWN!\\n\\nFailed ${bridgeState.failures} times\\nLast success: ${minutesSinceSuccess} min ago\\n\\nCheck:\\n- Bridge service\\n- Network\\n- AC power`\n            }\n        };\n        return [null, telegramMsg];\n    }\n}\n\n// Build request\nmsg.url = config.bridge_url + '/api/execute';\nmsg.method = 'POST';\nmsg.headers = { 'Content-Type': 'application/json' };\nmsg.payload = {\n    device_id: config.ac_device.device_id,\n    ip: config.ac_device.ip,\n    local_key: config.ac_device.local_key,\n    version: config.ac_device.version,\n    action: 'get_status'\n};\n\nmsg.timeout = 10000;\nmsg._requestTime = now;\n\nconst time = new Date().toLocaleTimeString('ro-RO', { hour: '2-digit', minute: '2-digit' });\nnode.status({ \n    fill: 'blue', \n    shape: 'ring', \n    text: `🔄 Getting status... (${time})` \n});\n\nreturn [msg, null];",
+        "outputs": 2,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 190,
+        "y": 240,
+        "wires": [
+            [
+                "5da6f21f3597f844"
+            ],
+            [
+                "4069fb3f24285c28"
+            ]
+        ]
+    },
+    {
+        "id": "5da6f21f3597f844",
+        "type": "http request",
+        "z": "11ab37b1755e53ac",
+        "name": "Bridge API",
+        "method": "use",
+        "ret": "obj",
+        "paytoqs": "ignore",
+        "url": "",
+        "tls": "",
+        "persist": false,
+        "proxy": "",
+        "authType": "",
+        "senderr": false,
+        "x": 390,
+        "y": 200,
+        "wires": [
+            [
+                "3927626e0f99bb7e"
+            ]
+        ]
+    },
+    {
+        "id": "3927626e0f99bb7e",
+        "type": "function",
+        "z": "11ab37b1755e53ac",
+        "name": "📊 Process AC Status",
+        "func": "// ============================================\n// PROCESS AC STATUS - Enhanced Display\n// ============================================\n\nconst response = msg.payload;\nconst requestTime = msg._requestTime || Date.now();\nconst responseTime = Date.now() - requestTime;\nconst bridgeState = flow.get('bridge_state') || { failures: 0, lastSuccess: 0 };\n\n// Handle errors\nif (!response || !response.success) {\n    bridgeState.failures++;\n    flow.set('bridge_state', bridgeState);\n    \n    const error = response?.error || 'No response';\n    node.status({ \n        fill: 'red', \n        shape: 'ring', \n        text: `❌ Bridge error: ${error} (${bridgeState.failures} fails)` \n    });\n    node.error(`Bridge API error: ${error}`);\n    return null;\n}\n\n// Success - reset failure counter\nbridgeState.failures = 0;\nbridgeState.lastSuccess = Date.now();\nflow.set('bridge_state', bridgeState);\n\n// Extract AC data\nconst acData = response.data || {};\nconst acStatus = {\n    power: acData.power || false,\n    mode: acData.mode || 'unknown',\n    targetTemp: acData.target_temperature || 0,\n    currentTemp: acData.current_temperature || 0,\n    fan: acData.fan_speed || 'unknown',\n    timestamp: new Date().toISOString()\n};\n\nflow.set('last_ac_status', acStatus);\n\n// Enhanced status display\nconst modeIcons = {\n    'cold': '❄️',\n    'hot': '🔥',\n    'auto': '🔄',\n    'wet': '💧',\n    'wind': '🌬️'\n};\n\nlet statusText, statusColor;\n\nif (acStatus.power) {\n    const icon = modeIcons[acStatus.mode] || '❓';\n    statusText = `${icon} ${acStatus.mode.toUpperCase()} ${acStatus.targetTemp}°C | Current:${acStatus.currentTemp}°C | ${responseTime}ms`;\n    statusColor = acStatus.mode === 'cold' ? 'blue' : \n                 acStatus.mode === 'hot' ? 'orange' : 'green';\n} else {\n    statusText = `⚫ OFF | Current:${acStatus.currentTemp}°C | ${responseTime}ms`;\n    statusColor = 'grey';\n}\n\nnode.status({\n    fill: statusColor,\n    shape: acStatus.power ? 'dot' : 'ring',\n    text: statusText\n});\n\nmsg.acStatus = acStatus;\nreturn msg;",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 600,
+        "y": 200,
+        "wires": [
+            [
+                "657e484b9f8679b6"
+            ]
+        ]
+    },
+    {
+        "id": "657e484b9f8679b6",
+        "type": "function",
+        "z": "11ab37b1755e53ac",
+        "name": "🧠 Main Decision Controller",
+        "func": "// ============================================\n// THERMAL CONTROL - PRODUCTION VERSION\n// Optimized for 2-minute check intervals\n// Battery target: 24.5°C ± 2°C (22.5-26.5°C)\n// ============================================\n\nconst CONFIG = global.get('thermal_config');\n\n// Get sensor data from global context\nconst sensors = {\n    battery: global.get('battery_data')?.temperature || null,\n    room: global.get('ruuvi_inside')?.temperature || null,\n    outside: global.get('ruuvi_outside')?.temperature || null,\n    batteryAge: global.get('battery_data')?.lastUpdate ? \n        (Date.now() - new Date(global.get('battery_data').lastUpdate).getTime()) / 1000 : 999999,\n    roomAge: global.get('ruuvi_inside')?.lastUpdate ?\n        (Date.now() - new Date(global.get('ruuvi_inside').lastUpdate).getTime()) / 1000 : 999999\n};\n\n// Get persistent state and ensure history exists\nlet state = flow.get('thermal_state') || {\n    lastMode: null,\n    lastAction: null,\n    lastChange: 0,\n    lastCommand: 0,\n    lastNotification: {}\n};\n\n// Ensure history object exists (for backward compatibility)\nif (!state.history) {\n    state.history = {\n        battery: [],\n        room: [],\n        timestamps: []\n    };\n}\n\n// ============================================\n// HELPER FUNCTIONS\n// ============================================\n\n// Calculate temperature trend over last 6 minutes (3 samples at 2-min intervals)\nfunction calculateTrend(history, timestamps) {\n    // Safety checks\n    if (!history || !timestamps || !Array.isArray(history) || !Array.isArray(timestamps)) {\n        return 0;\n    }\n    \n    if (history.length < 2 || timestamps.length < 2) {\n        return 0;\n    }\n    \n    // Use last 6 minutes of data (3 samples)\n    const sixMinutesAgo = Date.now() - (6 * 60 * 1000);\n    let relevantData = [];\n    \n    for (let i = 0; i < Math.min(history.length, timestamps.length); i++) {\n        if (timestamps[i] > sixMinutesAgo) {\n            relevantData.push({\n                value: history[i],\n                time: timestamps[i]\n            });\n        }\n    }\n    \n    if (relevantData.length < 2) return 0;\n    \n    // Simple linear trend\n    const first = relevantData[0];\n    const last = relevantData[relevantData.length - 1];\n    const timeDiff = (last.time - first.time) / 60000; // minutes\n    const tempDiff = last.value - first.value;\n    \n    return timeDiff > 0 ? tempDiff / timeDiff : 0;\n}\n\n// Update history with current readings\nfunction updateHistory() {\n    const now = Date.now();\n    \n    // Initialize history if needed\n    if (!state.history) {\n        state.history = {\n            battery: [],\n            room: [],\n            timestamps: []\n        };\n    }\n    \n    // Ensure arrays exist\n    if (!Array.isArray(state.history.battery)) state.history.battery = [];\n    if (!Array.isArray(state.history.room)) state.history.room = [];\n    if (!Array.isArray(state.history.timestamps)) state.history.timestamps = [];\n    \n    // Add current values\n    if (sensors.battery && sensors.room) {\n        state.history.battery.push(sensors.battery);\n        state.history.room.push(sensors.room);\n        state.history.timestamps.push(now);\n        \n        // Keep only last 20 minutes (10 samples at 2-min intervals)\n        const twentyMinutesAgo = now - (20 * 60 * 1000);\n        while (state.history.timestamps.length > 0 && \n               state.history.timestamps[0] < twentyMinutesAgo) {\n            state.history.battery.shift();\n            state.history.room.shift();\n            state.history.timestamps.shift();\n        }\n        \n        // Limit to 10 samples max\n        if (state.history.timestamps.length > 10) {\n            state.history.battery = state.history.battery.slice(-10);\n            state.history.room = state.history.room.slice(-10);\n            state.history.timestamps = state.history.timestamps.slice(-10);\n        }\n    }\n}\n\n// Determine if action is needed based on hysteresis\nfunction needsAction(temp, target, tolerance, currentMode, desiredMode) {\n    const diff = temp - target;\n    \n    // If AC is off, use full tolerance to turn on\n    if (!currentMode || currentMode === 'auto') {\n        return Math.abs(diff) > tolerance;\n    }\n    \n    // If already in correct mode, use 50% tolerance to maintain\n    if (currentMode === desiredMode) {\n        return Math.abs(diff) > tolerance * 0.5;\n    }\n    \n    // Mode switch needs full tolerance\n    return Math.abs(diff) > tolerance;\n}\n\n// Calculate thermal load\nfunction getThermalLoad(room, outside) {\n    if (!outside) return 0;\n    return Math.abs(room - outside);\n}\n\n// Determine fan speed based on conditions\nfunction selectFanSpeed(batteryDiff, roomTemp, thermalLoad, aggressive = false) {\n    if (aggressive) return 'high';\n    \n    let score = 0;\n    \n    // Battery difference from target\n    if (Math.abs(batteryDiff) > 3) score += 3;\n    else if (Math.abs(batteryDiff) > 2) score += 2;\n    else if (Math.abs(batteryDiff) > 1) score += 1;\n    \n    // Room temperature extremes\n    if (roomTemp > CONFIG.room.max || roomTemp < CONFIG.room.min) score += 2;\n    \n    // Thermal load (heat loss/gain)\n    if (thermalLoad > 20) score += 2;\n    else if (thermalLoad > 15) score += 1;\n    \n    // Map to fan speed\n    if (score >= 5) return 'high';\n    if (score >= 3) return 'middle';\n    if (score >= 1) return 'low';\n    return 'auto';\n}\n\n// ============================================\n// MAIN DECISION LOGIC\n// ============================================\n\nfunction makeDecision() {\n    const battery = sensors.battery;\n    const room = sensors.room;\n    const outside = sensors.outside;\n    const thermalLoad = getThermalLoad(room, outside);\n    \n    // Update history and calculate trends\n    updateHistory();\n    const batteryTrend = state.history && state.history.battery ? \n        calculateTrend(state.history.battery, state.history.timestamps) : 0;\n    const roomTrend = state.history && state.history.room ? \n        calculateTrend(state.history.room, state.history.timestamps) : 0;\n    \n    // Check sensor availability (5 minute timeout from config)\n    if (!battery || !room || \n        sensors.batteryAge > CONFIG.sensor_timeout_minutes * 60 ||\n        sensors.roomAge > CONFIG.sensor_timeout_minutes * 60) {\n        return {\n            action: 'SENSOR_FAILURE',\n            reason: `Sensors offline: Battery ${sensors.batteryAge}s, Room ${sensors.roomAge}s`,\n            power: false,\n            mode: null,\n            critical: true,\n            notify: true\n        };\n    }\n    \n    // Temperature differences\n    const batteryDiff = battery - CONFIG.battery.target;\n    const batteryError = Math.abs(batteryDiff);\n    \n    // ============================================\n    // PRIORITY 1: CRITICAL CONDITIONS\n    // ============================================\n    \n    // Critical hot (≥30°C)\n    if (battery >= CONFIG.battery.critical_hot) {\n        return {\n            action: 'CRITICAL_HOT',\n            mode: 'cold',\n            temp: 18, // Maximum cooling\n            fan: 'high',\n            power: true,\n            reason: `🚨 CRITICAL HOT! Battery ${battery.toFixed(1)}°C ≥ ${CONFIG.battery.critical_hot}°C`,\n            critical: true,\n            notify: true\n        };\n    }\n    \n    // Critical cold (≤18°C)\n    if (battery <= CONFIG.battery.critical_cold) {\n        return {\n            action: 'CRITICAL_COLD',\n            mode: 'hot',\n            temp: 28, // Maximum heating\n            fan: 'high',\n            power: true,\n            reason: `🚨 CRITICAL COLD! Battery ${battery.toFixed(1)}°C ≤ ${CONFIG.battery.critical_cold}°C`,\n            critical: true,\n            notify: true\n        };\n    }\n    \n    // ============================================\n    // PRIORITY 2: WARNING CONDITIONS\n    // ============================================\n    \n    // Warning hot (≥28°C) - aggressive cooling\n    if (battery >= CONFIG.battery.warning_hot) {\n        const targetTemp = room > CONFIG.room.max ? 20 : 22;\n        return {\n            action: 'WARNING_HOT',\n            mode: 'cold',\n            temp: targetTemp,\n            fan: 'high',\n            power: true,\n            reason: `⚠️ Warning: Battery ${battery.toFixed(1)}°C approaching critical`,\n            critical: false,\n            notify: true\n        };\n    }\n    \n    // Warning cold (≤20°C) - aggressive heating\n    if (battery <= CONFIG.battery.warning_cold) {\n        const targetTemp = room < CONFIG.room.min ? 26 : 24;\n        return {\n            action: 'WARNING_COLD',\n            mode: 'hot',\n            temp: targetTemp,\n            fan: 'high',\n            power: true,\n            reason: `⚠️ Warning: Battery ${battery.toFixed(1)}°C approaching critical`,\n            critical: false,\n            notify: true\n        };\n    }\n    \n    // ============================================\n    // PRIORITY 3: TOLERANCE MANAGEMENT (22.5-26.5°C)\n    // ============================================\n    \n    const upperLimit = CONFIG.battery.target + CONFIG.battery.tolerance; // 26.5°C\n    const lowerLimit = CONFIG.battery.target - CONFIG.battery.tolerance; // 22.5°C\n    \n    // Battery too hot (>26.5°C) with room also hot\n    if (battery > upperLimit && room > CONFIG.room.max) {\n        const targetTemp = Math.min(22, CONFIG.battery.target - 2);\n        const fanSpeed = thermalLoad > 15 ? 'high' : 'middle';\n        \n        return {\n            action: 'DUAL_COOLING',\n            mode: 'cold',\n            temp: targetTemp,\n            fan: fanSpeed,\n            power: true,\n            reason: `❄️ Dual cooling: Battery ${battery.toFixed(1)}°C, Room ${room.toFixed(1)}°C`,\n            notify: false\n        };\n    }\n    \n    // Battery too hot (>26.5°C)\n    if (needsAction(battery, CONFIG.battery.target, CONFIG.battery.tolerance, state.lastMode, 'cold') && \n        battery > upperLimit) {\n        \n        // Check if cooling naturally\n        if (batteryTrend < -0.3) {\n            return {\n                action: 'NATURAL_COOLING',\n                mode: 'auto',\n                temp: CONFIG.battery.target,\n                fan: 'low',\n                power: true,\n                reason: `📉 Natural cooling: ${battery.toFixed(1)}°C (${batteryTrend.toFixed(2)}°C/min)`,\n                notify: false\n            };\n        }\n        \n        const targetTemp = batteryDiff > 3 ? 22 : 23;\n        const fanSpeed = selectFanSpeed(batteryDiff, room, thermalLoad);\n        \n        return {\n            action: 'COOLING',\n            mode: 'cold',\n            temp: targetTemp,\n            fan: fanSpeed,\n            power: true,\n            reason: `❄️ Cooling: ${battery.toFixed(1)}°C → ${CONFIG.battery.target}°C`,\n            notify: false\n        };\n    }\n    \n    // Battery too cold (<22.5°C) with room also cold\n    if (battery < lowerLimit && room < CONFIG.room.min) {\n        const targetTemp = Math.max(24, CONFIG.battery.target + 2);\n        const fanSpeed = thermalLoad > 15 ? 'high' : 'middle';\n        \n        return {\n            action: 'DUAL_HEATING',\n            mode: 'hot',\n            temp: targetTemp,\n            fan: fanSpeed,\n            power: true,\n            reason: `🔥 Dual heating: Battery ${battery.toFixed(1)}°C, Room ${room.toFixed(1)}°C`,\n            notify: false\n        };\n    }\n    \n    // Battery too cold (<22.5°C)\n    if (needsAction(battery, CONFIG.battery.target, CONFIG.battery.tolerance, state.lastMode, 'hot') && \n        battery < lowerLimit) {\n        \n        // Check if heating naturally\n        if (batteryTrend > 0.3) {\n            return {\n                action: 'NATURAL_HEATING',\n                mode: 'auto',\n                temp: CONFIG.battery.target,\n                fan: 'low',\n                power: true,\n                reason: `📈 Natural heating: ${battery.toFixed(1)}°C (+${batteryTrend.toFixed(2)}°C/min)`,\n                notify: false\n            };\n        }\n        \n        const targetTemp = Math.abs(batteryDiff) > 3 ? 26 : 25;\n        const fanSpeed = selectFanSpeed(batteryDiff, room, thermalLoad);\n        \n        return {\n            action: 'HEATING',\n            mode: 'hot',\n            temp: targetTemp,\n            fan: fanSpeed,\n            power: true,\n            reason: `🔥 Heating: ${battery.toFixed(1)}°C → ${CONFIG.battery.target}°C`,\n            notify: false\n        };\n    }\n    \n    // ============================================\n    // PRIORITY 4: ROOM COMFORT (Battery OK)\n    // ============================================\n    \n    // Room too hot but battery OK\n    if (room > CONFIG.room.max && batteryError < CONFIG.battery.tolerance * 0.5) {\n        return {\n            action: 'ROOM_COOLING',\n            mode: 'cold',\n            temp: CONFIG.room.comfort,\n            fan: 'low',\n            power: true,\n            reason: `Room comfort: ${room.toFixed(1)}°C (Battery OK)`,\n            notify: false\n        };\n    }\n    \n    // Room too cold but battery OK\n    if (room < CONFIG.room.min && batteryError < CONFIG.battery.tolerance * 0.5) {\n        return {\n            action: 'ROOM_HEATING',\n            mode: 'hot',\n            temp: CONFIG.room.comfort,\n            fan: 'low',\n            power: true,\n            reason: `Room comfort: ${room.toFixed(1)}°C (Battery OK)`,\n            notify: false\n        };\n    }\n    \n    // ============================================\n    // PRIORITY 5: OPTIMIZATION\n    // ============================================\n    \n    // Temperature imbalance - circulate air\n    if (Math.abs(battery - room) > 3) {\n        return {\n            action: 'CIRCULATE',\n            mode: 'auto',\n            temp: Math.round((battery * 0.7 + room * 0.3)), // Weighted towards battery\n            fan: 'middle',\n            power: true,\n            reason: `🌀 Circulating: Battery ${battery.toFixed(1)}°C ↔ Room ${room.toFixed(1)}°C`,\n            notify: false\n        };\n    }\n    \n    // Predictive control - anticipate problems\n    const predictedBattery = battery + (batteryTrend * 4); // 4 minutes ahead (2 checks)\n    if (predictedBattery > upperLimit || predictedBattery < lowerLimit) {\n        const preventiveMode = predictedBattery > CONFIG.battery.target ? 'cold' : 'hot';\n        return {\n            action: 'PREVENTIVE',\n            mode: preventiveMode,\n            temp: CONFIG.battery.target,\n            fan: 'auto',\n            power: true,\n            reason: `🎯 Preventive ${preventiveMode}: Trend ${batteryTrend > 0 ? '+' : ''}${batteryTrend.toFixed(2)}°C/min`,\n            notify: false\n        };\n    }\n    \n    // All optimal - maintain\n    const trendInfo = Math.abs(batteryTrend) > 0.1 ? \n        ` (${batteryTrend > 0 ? '↑' : '↓'}${Math.abs(batteryTrend).toFixed(2)}°C/min)` : '';\n    const thermalInfo = thermalLoad > 10 ? ` | Load: ${thermalLoad.toFixed(0)}°C` : '';\n    \n    return {\n        action: 'OPTIMAL',\n        mode: 'auto',\n        temp: CONFIG.battery.target,\n        fan: 'auto',\n        power: true,\n        reason: `✅ Optimal: ${battery.toFixed(1)}°C${trendInfo}${thermalInfo}`,\n        notify: false\n    };\n}\n\n// ============================================\n// EXECUTION\n// ============================================\n\n// Get decision\nconst decision = makeDecision();\n\n// Anti-cycling protection\nif (!decision.critical) {\n    const timeSinceChange = (Date.now() - state.lastChange) / 60000;\n    \n    // Check minimum cycle time (10 minutes from config)\n    if (timeSinceChange < CONFIG.ac.min_cycle_minutes && \n        decision.mode !== state.lastMode &&\n        state.lastMode !== null &&\n        state.lastMode !== 'auto' &&\n        decision.mode !== 'auto') {\n        \n        const remaining = (CONFIG.ac.min_cycle_minutes - timeSinceChange).toFixed(1);\n        node.status({\n            fill: 'yellow',\n            shape: 'ring',\n            text: `⏳ Cycle protection: ${remaining}min | ${decision.reason}`\n        });\n        return null;\n    }\n    \n    // Debounce (5 seconds from config)\n    const timeSinceCommand = (Date.now() - state.lastCommand) / 1000;\n    if (timeSinceCommand < CONFIG.ac.debounce_seconds) {\n        return null;\n    }\n}\n\n// Telegram notification logic\nlet telegramMsg = null;\nif (CONFIG.telegram.enabled) {\n    const now = Date.now();\n    const lastNotif = state.lastNotification[decision.action] || 0;\n    const timeSinceNotif = (now - lastNotif) / 60000;\n    \n    // Determine if notification needed\n    const shouldNotify = \n        (decision.notify && timeSinceNotif > CONFIG.telegram.min_repeat_minutes) ||\n        (decision.critical && CONFIG.telegram.notify_critical) ||\n        (CONFIG.telegram.notify_state_changes && \n         state.lastAction !== decision.action &&\n         !['NATURAL_COOLING', 'NATURAL_HEATING', 'CIRCULATE', 'PREVENTIVE'].includes(decision.action) &&\n         timeSinceNotif > CONFIG.telegram.min_repeat_minutes);\n    \n    if (shouldNotify) {\n        const icon = decision.critical ? '🚨' : \n                    decision.action.includes('WARNING') ? '⚠️' :\n                    decision.action.includes('COOLING') ? '❄️' :\n                    decision.action.includes('HEATING') ? '🔥' : '🔄';\n        \n        const batteryTrend = state.history && state.history.battery ? \n            calculateTrend(state.history.battery, state.history.timestamps) : 0;\n        const trendInfo = Math.abs(batteryTrend) > 0.1 ? \n            `\\nTrend: ${batteryTrend > 0 ? '↑' : '↓'}${Math.abs(batteryTrend).toFixed(2)}°C/min` : '';\n        \n        telegramMsg = {\n            payload: {\n                chatId: CONFIG.telegram.chat_id,\n                type: 'message',\n                content: `${icon} **${decision.action}**\\n${decision.reason}\\n\\n` +\n                        `Battery: ${sensors.battery?.toFixed(1)}°C (Target: ${CONFIG.battery.target}°C)\\n` +\n                        `Room: ${sensors.room?.toFixed(1)}°C\\n` +\n                        `Outside: ${sensors.outside?.toFixed(1) || 'N/A'}°C${trendInfo}\\n\\n` +\n                        `AC: ${decision.mode?.toUpperCase() || 'OFF'} ${decision.temp || ''}°C (Fan: ${decision.fan || 'off'})`\n            }\n        };\n        \n        if (!state.lastNotification) state.lastNotification = {};\n        state.lastNotification[decision.action] = now;\n    }\n}\n\n// Update state\nif (decision.mode !== state.lastMode) {\n    state.lastMode = decision.mode;\n    state.lastChange = Date.now();\n}\nstate.lastAction = decision.action;\nstate.lastCommand = Date.now();\nflow.set('thermal_state', state);\n\n// Status display\nconst statusColor = \n    decision.critical ? 'red' :\n    decision.action.includes('WARNING') ? 'orange' :\n    decision.action.includes('COOLING') || decision.mode === 'cold' ? 'blue' :\n    decision.action.includes('HEATING') || decision.mode === 'hot' ? 'orange' :\n    decision.action === 'OPTIMAL' ? 'green' : 'grey';\n\nconst batteryTrend = state.history && state.history.battery ? \n    calculateTrend(state.history.battery, state.history.timestamps) : 0;\nconst trendSymbol = batteryTrend > 0.1 ? '↑' : \n                   batteryTrend < -0.1 ? '↓' : '→';\n\nnode.status({\n    fill: statusColor,\n    shape: decision.power ? 'dot' : 'ring',\n    text: `${decision.action} [${decision.mode?.toUpperCase() || 'OFF'} ${decision.temp || ''}°C] B:${sensors.battery?.toFixed(1)}°C ${trendSymbol}`\n});\n\n// Log significant events\nif (state.lastAction !== decision.action) {\n    node.warn(`📊 Action: ${decision.action} | ${decision.reason}`);\n}\n\n// Prepare output messages\nmsg.payload = decision;\nmsg.sensors = sensors;\nmsg.timestamp = new Date().toISOString();\n\n// InfluxDB metrics\nconst thermalLoad = sensors.outside && sensors.room ? \n    Math.abs(sensors.room - sensors.outside) : null;\n\nconst influxMsg = {\n    payload: [{\n        measurement: 'thermal_control',\n        tags: {\n            action: decision.action,\n            mode: decision.mode || 'off',\n            power: decision.power ? 'on' : 'off',\n            critical: decision.critical ? 'true' : 'false'\n        },\n        fields: {\n            battery_temp: sensors.battery,\n            room_temp: sensors.room,\n            outside_temp: sensors.outside,\n            target_temp: decision.temp,\n            fan_speed: decision.fan || 'off',\n            battery_error: sensors.battery ? Math.abs(sensors.battery - CONFIG.battery.target) : null,\n            battery_trend: batteryTrend,\n            thermal_load: thermalLoad,\n            temp_diff: sensors.battery && sensors.room ? \n                Math.abs(sensors.battery - sensors.room) : null\n        }\n        // Let InfluxDB use server timestamp\n    }]\n};\n\n// Debug info\nconst debugMsg = {\n    payload: {\n        decision: decision,\n        sensors: sensors,\n        trends: {\n            battery: batteryTrend,\n            room: state.history && state.history.room ? \n                calculateTrend(state.history.room, state.history.timestamps) : 0\n        },\n        state: state,\n        config: {\n            battery_target: CONFIG.battery.target,\n            tolerance: CONFIG.battery.tolerance,\n            limits: `${CONFIG.battery.target - CONFIG.battery.tolerance} - ${CONFIG.battery.target + CONFIG.battery.tolerance}°C`\n        },\n        timestamp: new Date().toISOString()\n    }\n};\n\nreturn [msg, telegramMsg, influxMsg, debugMsg];",
+        "outputs": 3,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 940,
+        "y": 200,
+        "wires": [
+            [
+                "396c3f4d5316461a"
+            ],
+            [
+                "1d25fd2ee296bfa8"
+            ],
+            [
+                "52951a320e9a39ea"
+            ]
+        ]
+    },
+    {
+        "id": "396c3f4d5316461a",
+        "type": "function",
+        "z": "11ab37b1755e53ac",
+        "name": "📤 Send AC Command",
+        "func": "// ============================================\n// SEND AC COMMAND - With Detailed Status\n// ============================================\n\nconst config = global.get('thermal_config');\nconst decision = msg.payload;\nconst lastStatus = flow.get('last_ac_status') || {};\nconst time = new Date().toLocaleTimeString('ro-RO', { hour: '2-digit', minute: '2-digit' });\n\nif (!config || !decision) {\n    node.status({ fill: 'red', shape: 'ring', text: '❌ Missing config/decision' });\n    return null;\n}\n\n// Check what changed\nlet changeInfo = '';\nif (lastStatus.power !== decision.power) {\n    changeInfo = decision.power ? '🟢 Turning ON' : '🔴 Turning OFF';\n} else if (decision.power && lastStatus.mode !== decision.mode) {\n    changeInfo = `🔄 ${lastStatus.mode} → ${decision.mode}`;\n} else if (decision.power && lastStatus.targetTemp !== decision.temp) {\n    changeInfo = `🌡️ ${lastStatus.targetTemp}°C → ${decision.temp}°C`;\n} else {\n    changeInfo = '↔️ No change';\n}\n\n// Build command\nmsg.url = config.bridge_url + '/api/execute';\nmsg.method = 'POST';\nmsg.headers = { 'Content-Type': 'application/json' };\n\nif (decision.power === false) {\n    msg.payload = {\n        device_id: config.ac_device.device_id,\n        ip: config.ac_device.ip,\n        local_key: config.ac_device.local_key,\n        version: config.ac_device.version,\n        action: 'set_power',\n        params: { value: false }\n    };\n    \n    node.status({\n        fill: 'red',\n        shape: 'ring',\n        text: `⏹️ Sending OFF | ${changeInfo} (${time})`\n    });\n} else {\n    msg.payload = {\n        device_id: config.ac_device.device_id,\n        ip: config.ac_device.ip,\n        local_key: config.ac_device.local_key,\n        version: config.ac_device.version,\n        action: 'set_multiple',\n        params: {\n            power: true,\n            temperature: decision.temp,\n            mode: decision.mode,\n            fan: decision.fan\n        }\n    };\n    \n    const modeIcon = {\n        'cold': '❄️',\n        'hot': '🔥',\n        'auto': '🔄',\n        'wind': '🌬️'\n    }[decision.mode] || '❓';\n    \n    node.status({\n        fill: decision.mode === 'cold' ? 'blue' : 'orange',\n        shape: 'ring',\n        text: `📤 ${modeIcon} ${decision.mode?.toUpperCase()} ${decision.temp}°C | ${changeInfo} (${time})`\n    });\n}\n\nmsg.commandSent = {\n    decision: decision,\n    changeInfo: changeInfo,\n    timestamp: time\n};\n\nreturn msg;",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 1300,
+        "y": 120,
+        "wires": [
+            [
+                "1ef94cad204119aa"
+            ]
+        ]
+    },
+    {
+        "id": "1ef94cad204119aa",
+        "type": "http request",
+        "z": "11ab37b1755e53ac",
+        "name": "Execute",
+        "method": "use",
+        "ret": "obj",
+        "paytoqs": "ignore",
+        "url": "",
+        "tls": "",
+        "persist": false,
+        "proxy": "",
+        "authType": "",
+        "senderr": false,
+        "x": 1520,
+        "y": 120,
+        "wires": [
+            [
+                "7398bd6b5d0279e4"
+            ]
+        ]
+    },
+    {
+        "id": "7398bd6b5d0279e4",
+        "type": "function",
+        "z": "11ab37b1755e53ac",
+        "name": "✅ Command Result",
+        "func": "// ============================================\n// COMMAND RESULT - Confirm Execution\n// ============================================\n\nconst result = msg.payload;\nconst commandSent = msg.commandSent || {};\nconst time = commandSent.timestamp || new Date().toLocaleTimeString('ro-RO');\n\nif (!result || !result.success) {\n    const error = result?.error || 'Unknown error';\n    node.status({\n        fill: 'red',\n        shape: 'ring',\n        text: `❌ Failed: ${error} (${time})`\n    });\n    node.error(`AC command failed: ${error}`);\n    \n    // Notify failure\n    if (global.get('thermal_config')?.telegram?.enabled) {\n        return {\n            payload: {\n                chatId: global.get('thermal_config').telegram.chat_id,\n                type: 'message',\n                content: `❌ AC Command Failed!\\n\\n${commandSent.changeInfo}\\nError: ${error}`\n            }\n        };\n    }\n    return null;\n}\n\n// Success\nconst decision = commandSent.decision || {};\nif (decision.power === false) {\n    node.status({\n        fill: 'grey',\n        shape: 'dot',\n        text: `✅ OFF confirmed | ${commandSent.changeInfo} (${time})`\n    });\n} else {\n    const modeIcon = {\n        'cold': '❄️',\n        'hot': '🔥',\n        'auto': '🔄',\n        'wind': '🌬️'\n    }[decision.mode] || '❓';\n    \n    node.status({\n        fill: 'green',\n        shape: 'dot',\n        text: `✅ ${modeIcon} ${decision.mode?.toUpperCase()} ${decision.temp}°C | ${commandSent.changeInfo} (${time})`\n    });\n}\n\nif (commandSent.changeInfo && !commandSent.changeInfo.includes('No change')) {\n    node.warn(`✅ AC command executed: ${commandSent.changeInfo}`);\n}\n\nreturn null;",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 1760,
+        "y": 120,
+        "wires": [
+            [
+                "9d964d4a123589f5"
+            ]
+        ]
+    },
+    {
+        "id": "592174d92f8c5aa5",
+        "type": "victron-input-battery",
+        "z": "11ab37b1755e53ac",
+        "service": "com.victronenergy.battery/512",
+        "path": "/Dc/0/Temperature",
+        "serviceObj": {
+            "service": "com.victronenergy.battery/512",
+            "name": "Battery Bank"
+        },
+        "pathObj": {
+            "path": "/Dc/0/Temperature",
+            "type": "float",
+            "name": "Battery temperature (°C)"
+        },
+        "name": "Battery Temp",
+        "onlyChanges": false,
+        "roundValues": "2",
+        "x": 110,
+        "y": 440,
+        "wires": [
+            [
+                "409aa3aebf1ee2b3"
+            ]
+        ]
+    },
+    {
+        "id": "409aa3aebf1ee2b3",
+        "type": "function",
+        "z": "11ab37b1755e53ac",
+        "name": "Update Battery",
+        "func": "const temp = msg.payload;\nif (temp !== null && !isNaN(temp)) {\n    global.set('battery_data', {\n        temperature: temp,\n        lastUpdate: new Date().toISOString()\n    });\n    node.status({ fill: 'green', shape: 'dot', text: `${temp.toFixed(1)}°C` });\n}\nreturn null;",
+        "outputs": 0,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 420,
+        "y": 440,
+        "wires": []
+    },
+    {
+        "id": "deca4e718ecd62ed",
+        "type": "victron-input-temperature",
+        "z": "11ab37b1755e53ac",
+        "service": "com.victronenergy.temperature/22",
+        "path": "/Temperature",
+        "serviceObj": {
+            "service": "com.victronenergy.temperature/22",
+            "name": "ruuvi_inside"
+        },
+        "pathObj": {
+            "path": "/Temperature",
+            "type": "float",
+            "name": "Temperature (°C)"
+        },
+        "name": "Ruuvi Inside",
+        "onlyChanges": false,
+        "roundValues": "2",
+        "x": 110,
+        "y": 500,
+        "wires": [
+            [
+                "3778c28f0a731031"
+            ]
+        ]
+    },
+    {
+        "id": "3778c28f0a731031",
+        "type": "function",
+        "z": "11ab37b1755e53ac",
+        "name": "Update Room",
+        "func": "const temp = msg.payload;\nif (temp !== null && !isNaN(temp)) {\n    global.set('ruuvi_inside', {\n        temperature: temp,\n        lastUpdate: new Date().toISOString()\n    });\n    node.status({ fill: 'green', shape: 'dot', text: `${temp.toFixed(1)}°C` });\n}\nreturn null;",
+        "outputs": 0,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 420,
+        "y": 500,
+        "wires": []
+    },
+    {
+        "id": "692848168246398e",
+        "type": "victron-input-temperature",
+        "z": "11ab37b1755e53ac",
+        "service": "com.victronenergy.temperature/23",
+        "path": "/Temperature",
+        "serviceObj": {
+            "service": "com.victronenergy.temperature/23",
+            "name": "ruuvi_outside"
+        },
+        "pathObj": {
+            "path": "/Temperature",
+            "type": "float",
+            "name": "Temperature (°C)"
+        },
+        "name": "Ruuvi Outside",
+        "onlyChanges": false,
+        "roundValues": "2",
+        "x": 110,
+        "y": 560,
+        "wires": [
+            [
+                "3dcb55c9d6d8f567"
+            ]
+        ]
+    },
+    {
+        "id": "3dcb55c9d6d8f567",
+        "type": "function",
+        "z": "11ab37b1755e53ac",
+        "name": "Update Outdoor",
+        "func": "const temp = msg.payload;\nif (temp !== null && !isNaN(temp)) {\n    global.set('ruuvi_outside', {\n        temperature: temp,\n        lastUpdate: new Date().toISOString()\n    });\n    node.status({ fill: 'green', shape: 'dot', text: `${temp.toFixed(1)}°C` });\n}\nreturn null;",
+        "outputs": 0,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 420,
+        "y": 560,
+        "wires": []
+    },
+    {
+        "id": "aa17a092128f2a8e",
+        "type": "inject",
+        "z": "11ab37b1755e53ac",
+        "name": "⏰ Log Every Minute",
+        "props": [],
+        "repeat": "60",
+        "crontab": "",
+        "once": true,
+        "onceDelay": "10",
+        "topic": "",
+        "x": 160,
+        "y": 360,
+        "wires": [
+            [
+                "2f39f81bce836e7d"
+            ]
+        ]
+    },
+    {
+        "id": "2f39f81bce836e7d",
+        "type": "function",
+        "z": "11ab37b1755e53ac",
+        "name": "Prepare Sensors Log",
+        "func": "const battery = global.get('battery_data');\nconst room = global.get('ruuvi_inside');\nconst outside = global.get('ruuvi_outside');\nconst acStatus = flow.get('last_ac_status');\n\nif (!battery?.temperature || !room?.temperature) {\n    node.status({ fill: 'grey', shape: 'ring', text: 'No data' });\n    return null;\n}\n\nmsg.payload = [{\n    measurement: 'thermal_sensors',\n    fields: {\n        battery_temp: battery.temperature,\n        room_temp: room.temperature,\n        outside_temp: outside?.temperature || null,\n        ac_power: acStatus?.power ? 1 : 0,\n        ac_mode: acStatus?.mode || 'off',\n        ac_target_temp: acStatus?.targetTemp || null,\n        ac_current_temp: acStatus?.currentTemp || null\n    }\n}];\n\nnode.status({ \n    fill: 'green', \n    shape: 'dot', \n    text: `Logged: B:${battery.temperature.toFixed(1)}°C R:${room.temperature.toFixed(1)}°C` \n});\n\nreturn msg;",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 440,
+        "y": 360,
+        "wires": [
+            [
+                "ad13928269c7afcf"
+            ]
+        ]
+    },
+    {
+        "id": "73ef1fcbdaf030ab",
+        "type": "influxdb batch",
+        "z": "11ab37b1755e53ac",
+        "influxdb": "10e22e6ed15b50cf",
+        "precision": "s",
+        "retentionPolicy": "",
+        "name": "InfluxDB",
+        "database": "thermal_control",
+        "precisionV18FluxV20": "s",
+        "retentionPolicyV18Flux": "",
+        "org": "home",
+        "bucket": "thermal_control",
+        "x": 1400,
+        "y": 360,
+        "wires": []
+    },
+    {
+        "id": "e17c36a8c35e1bc3",
+        "type": "telegram sender",
+        "z": "11ab37b1755e53ac",
+        "name": "Send",
+        "bot": "telegram_bot_config",
+        "haserroroutput": false,
+        "outputs": 1,
+        "x": 1390,
+        "y": 460,
+        "wires": [
+            []
+        ]
+    },
+    {
+        "id": "45d18f7b79b380b3",
+        "type": "inject",
+        "z": "11ab37b1755e53ac",
+        "name": "Manual OFF",
+        "props": [
+            {
+                "p": "payload"
+            }
+        ],
+        "repeat": "",
+        "crontab": "",
+        "once": false,
+        "onceDelay": 0.1,
+        "topic": "",
+        "payload": "{\"power\":false,\"reason\":\"Manual OFF\",\"action\":\"MANUAL_OFF\"}",
+        "payloadType": "json",
+        "x": 990,
+        "y": 60,
+        "wires": [
+            [
+                "396c3f4d5316461a"
+            ]
+        ]
+    },
+    {
+        "id": "14285cfaa3a7b96c",
+        "type": "inject",
+        "z": "11ab37b1755e53ac",
+        "name": "Manual COOL",
+        "props": [
+            {
+                "p": "payload"
+            }
+        ],
+        "repeat": "",
+        "crontab": "",
+        "once": false,
+        "onceDelay": 0.1,
+        "topic": "",
+        "payload": "{\"power\":true,\"mode\":\"cold\",\"temp\":23,\"fan\":\"auto\",\"reason\":\"Manual COOL\",\"action\":\"MANUAL_COOL\"}",
+        "payloadType": "json",
+        "x": 990,
+        "y": 120,
+        "wires": [
+            [
+                "396c3f4d5316461a"
+            ]
+        ]
+    },
+    {
+        "id": "9d964d4a123589f5",
+        "type": "link out",
+        "z": "11ab37b1755e53ac",
+        "name": "link out 1",
+        "mode": "link",
+        "links": [
+            "e87e7ef63eb6e7b5"
+        ],
+        "x": 1935,
+        "y": 120,
+        "wires": []
+    },
+    {
+        "id": "e87e7ef63eb6e7b5",
+        "type": "link in",
+        "z": "11ab37b1755e53ac",
+        "name": "link in 1",
+        "links": [
+            "9d964d4a123589f5",
+            "4069fb3f24285c28",
+            "1d25fd2ee296bfa8"
+        ],
+        "x": 1255,
+        "y": 460,
+        "wires": [
+            [
+                "e17c36a8c35e1bc3"
+            ]
+        ]
+    },
+    {
+        "id": "4069fb3f24285c28",
+        "type": "link out",
+        "z": "11ab37b1755e53ac",
+        "name": "link out 2",
+        "mode": "link",
+        "links": [
+            "e87e7ef63eb6e7b5"
+        ],
+        "x": 325,
+        "y": 280,
+        "wires": []
+    },
+    {
+        "id": "1d25fd2ee296bfa8",
+        "type": "link out",
+        "z": "11ab37b1755e53ac",
+        "name": "link out 3",
+        "mode": "link",
+        "links": [
+            "e87e7ef63eb6e7b5"
+        ],
+        "x": 1215,
+        "y": 200,
+        "wires": []
+    },
+    {
+        "id": "ad13928269c7afcf",
+        "type": "link out",
+        "z": "11ab37b1755e53ac",
+        "name": "link out 4",
+        "mode": "link",
+        "links": [
+            "d7b47ebfbcf45100"
+        ],
+        "x": 635,
+        "y": 360,
+        "wires": []
+    },
+    {
+        "id": "d7b47ebfbcf45100",
+        "type": "link in",
+        "z": "11ab37b1755e53ac",
+        "name": "link in 2",
+        "links": [
+            "ad13928269c7afcf",
+            "52951a320e9a39ea"
+        ],
+        "x": 1255,
+        "y": 360,
+        "wires": [
+            [
+                "73ef1fcbdaf030ab"
+            ]
+        ]
+    },
+    {
+        "id": "52951a320e9a39ea",
+        "type": "link out",
+        "z": "11ab37b1755e53ac",
+        "name": "link out 5",
+        "mode": "link",
+        "links": [
+            "d7b47ebfbcf45100"
+        ],
+        "x": 1215,
+        "y": 240,
+        "wires": []
+    },
+    {
+        "id": "10e22e6ed15b50cf",
+        "type": "influxdb",
+        "hostname": "YOUR_INFLUXDB_HOST",
+        "port": "8086",
+        "protocol": "http",
+        "database": "victron_data",
+        "name": "InfluxDB",
+        "usetls": false,
+        "tls": "",
+        "influxdbVersion": "2.0",
+        "url": "http://YOUR_INFLUXDB_HOST:8086",
+        "timeout": "10",
+        "rejectUnauthorized": false
+    },
+    {
+        "id": "telegram_bot_config",
+        "type": "telegram bot",
+        "botname": "Thermal Alert Bot",
+        "usernames": "",
+        "chatids": "",
+        "baseapiurl": "",
+        "testenvironment": false,
+        "updatemode": "polling",
+        "addressfamily": "",
+        "pollinterval": "300",
+        "usesocks": false,
+        "sockshost": "",
+        "socksport": "6667",
+        "socksusername": "anonymous",
+        "sockspassword": "",
+        "bothost": "",
+        "botpath": "",
+        "localbothost": "",
+        "localbotport": "8443",
+        "publicbotport": "8443",
+        "privatekey": "",
+        "certificate": "",
+        "useselfsignedcertificate": false,
+        "sslterminated": false,
+        "verboselogging": false
+    }
+]

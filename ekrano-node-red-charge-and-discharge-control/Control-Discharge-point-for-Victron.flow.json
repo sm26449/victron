@@ -1,0 +1,198 @@
+[
+    {
+        "id": "a999428c474fd4b7",
+        "type": "group",
+        "z": "fbae6d16d556cf55",
+        "name": "6. Control Discharge point for Victron",
+        "style": {
+            "label": true
+        },
+        "nodes": [
+            "0ac36a8097f78435",
+            "c97c68099ae6506c",
+            "77b6f61938407b47",
+            "56a28fd3cae94337",
+            "0caa8ddaea41b37c",
+            "a8aa10c65a3314b3",
+            "70d462996ba67653",
+            "9bc73866940d7161"
+        ],
+        "x": 54,
+        "y": 1179,
+        "w": 1212,
+        "h": 182
+    },
+    {
+        "id": "0ac36a8097f78435",
+        "type": "function",
+        "z": "fbae6d16d556cf55",
+        "g": "a999428c474fd4b7",
+        "name": "Adaptive Grid Control",
+        "func": "// Logica de control adaptiv pentru grid set-point\n// bazat pe puterea PV generata - exportam procent din productia actuala\n// NOTA: Valori negative = export, valori pozitive = import\n\nlet solar_W = 0;\nlet solar_kW = 0;\n\n// Verificam daca avem date de la solar\nif (msg.solar_power && msg.solar_power.totalPower !== undefined) {\n    solar_W = msg.solar_power.totalPower; // Puterea totala in Wati\n    solar_kW = solar_W / 1000; // Convertim in kW\n} else {\n    // Daca nu avem date in mesaj, citim din global\n    let globalSolar = global.get('solar_data_power') || {};\n    if (globalSolar.totalPower !== undefined) {\n        solar_W = globalSolar.totalPower;\n        solar_kW = solar_W / 1000;\n    } else {\n        node.warn(\"Nu sunt disponibile date solare!\");\n        node.status({fill:\"red\", shape:\"ring\", text:\"No solar data\"});\n        return null;\n    }\n}\n\nlet gridSetPoint = 0;\nlet exportPower = 0; // Puterea efectiva de export\nlet percentage = 0;\n\n// Obtinem limita maxima de export permisa de retea (default 10000W)\nlet maxGridExport = global.get('max_grid_export') || 10000;\n\n// LOGICA ACTUALIZATA - Exportam procent din productia PV actuala:\n// Daca PV < 10kW: Export = 0 (nu exportam nimic)\n// Daca PV >= 10kW si < 20kW: Export = 80% din productia PV\n// Daca PV >= 20kW si < 30kW: Export = 60% din productia PV\n// Daca PV >= 30kW: Export = 50% din productia PV\n\nif (solar_kW < 10) {\n    // Sub 10kW - NU exportam deloc\n    percentage = 0;\n    exportPower = 0;\n    gridSetPoint = 0; // Zero export/import\n    \n} else if (solar_kW >= 10 && solar_kW < 20) {\n    // 10-20kW - exportam 80% din productia PV\n    percentage = 90;\n    exportPower = Math.round(solar_W * 0.9);\n    \n} else if (solar_kW >= 20 && solar_kW < 35) {\n    // 20-30kW - exportam 60% din productia PV\n    percentage = 80;\n    exportPower = Math.round(solar_W * 0.7);\n    \n} else if (solar_kW >= 35) {\n    // Peste 30kW - exportam 50% din productia PV\n    percentage = 70;\n    exportPower = Math.round(solar_W * 0.6);\n}\n\n// Limitam exportul la maximul permis de retea\n//if (exportPower > maxGridExport) {\n//    node.warn(`Export limitat de la ${exportPower}W la ${maxGridExport}W (limita retea)`);\n//    exportPower = maxGridExport;\n//}\n\n// Setam grid setpoint (valoare negativa pentru export)\nif (exportPower > 0) {\n    gridSetPoint = -exportPower;\n}\n\n// Salvam valorile in context global pentru monitorizare\nlet gridControl = {\n    solar_W: solar_W,\n    solar_kW: solar_kW.toFixed(2),\n    exportPower: exportPower,\n    exportPercent: percentage,\n    gridSetPoint: gridSetPoint,\n    maxGridExport: maxGridExport,\n    consumLocal: solar_W - exportPower, // Cat ramane pentru consum local\n    lastUpdate: new Date().toISOString()\n};\n\nglobal.set('adaptive_grid_control', gridControl);\n\n// Setam statusul nodului cu culori diferite pe intervale\nlet statusColor = \"grey\";\nif (solar_kW >= 30) statusColor = \"green\";\nelse if (solar_kW >= 20) statusColor = \"yellow\"; \nelse if (solar_kW >= 10) statusColor = \"blue\";\nelse statusColor = \"red\";\n\n// Calculam procentul real de export (poate fi mai mic daca am atins limita retelei)\nlet realExportPercent = solar_W > 0 ? Math.round((exportPower / solar_W) * 100) : 0;\n\nnode.status({\n    fill: statusColor,\n    shape: \"dot\",\n    text: `PV: ${solar_kW.toFixed(1)}kW | Export: ${(exportPower/1000).toFixed(1)}kW (${realExportPercent}%) | Local: ${((solar_W - exportPower)/1000).toFixed(1)}kW`\n});\n\n// Pregatim mesajul pentru Victron ESS\nmsg.payload = gridSetPoint;\nmsg.gridControl = gridControl;\n\nreturn msg;",
+        "outputs": 1,
+        "timeout": "",
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 260,
+        "y": 1320,
+        "wires": [
+            [
+                "c97c68099ae6506c"
+            ]
+        ]
+    },
+    {
+        "id": "c97c68099ae6506c",
+        "type": "delay",
+        "z": "fbae6d16d556cf55",
+        "g": "a999428c474fd4b7",
+        "name": "Rate Limit 10s",
+        "pauseType": "rate",
+        "timeout": "5",
+        "timeoutUnits": "seconds",
+        "rate": "1",
+        "nbRateUnits": "10",
+        "rateUnits": "second",
+        "randomFirst": "1",
+        "randomLast": "5",
+        "randomUnits": "seconds",
+        "drop": true,
+        "allowrate": false,
+        "outputs": 1,
+        "x": 560,
+        "y": 1320,
+        "wires": [
+            [
+                "77b6f61938407b47"
+            ]
+        ]
+    },
+    {
+        "id": "77b6f61938407b47",
+        "type": "function",
+        "z": "fbae6d16d556cf55",
+        "g": "a999428c474fd4b7",
+        "name": "Smooth Transition",
+        "func": "// Smooth Transition - FĂRĂ LIMITE DE EXPORT\nlet targetSetPoint = msg.payload;\nlet lastSetPoint = context.get('lastSetPoint');\nlet lastUpdateTime = context.get('lastUpdateTime') || Date.now();\nlet currentTime = Date.now();\nlet timeDelta = (currentTime - lastUpdateTime) / 1000;\n\n// Prima rulare sau timeout - setare directă\nif (lastSetPoint === undefined || timeDelta > 60) {\n    node.warn(`Reset - setare directă la ${targetSetPoint}W`);\n    context.set('lastSetPoint', targetSetPoint);\n    context.set('lastUpdateTime', currentTime);\n    msg.payload = targetSetPoint;\n    \n    node.status({\n        fill: \"yellow\",\n        shape: \"dot\",\n        text: `Reset: ${(targetSetPoint/1000).toFixed(1)}kW`\n    });\n    return msg;\n}\n\n// Calculăm diferența\nlet difference = Math.abs(targetSetPoint - lastSetPoint);\n\n// Smoothing adaptiv\nlet smoothingFactor;\nif (difference < 500) {\n    smoothingFactor = 0.5;\n} else if (difference < 2000) {\n    smoothingFactor = 0.6;\n} else if (difference < 5000) {\n    smoothingFactor = 0.7;\n} else {\n    smoothingFactor = 0.8;\n}\n\n// Calculăm noua valoare\nlet newSetPoint = Math.round(lastSetPoint + (targetSetPoint - lastSetPoint) * smoothingFactor);\n\n// Aproape de target - setăm direct\nif (Math.abs(newSetPoint - targetSetPoint) < 100) {\n    newSetPoint = targetSetPoint;\n}\n\n// NU MAI LIMITĂM EXPORTUL - doar prevenim importul\nif (newSetPoint > 0) {\n    newSetPoint = 0; // Nu importăm\n    node.warn(\"Prevenit import - setat la 0W\");\n}\n\n// Salvăm pentru următoarea iterație\ncontext.set('lastSetPoint', newSetPoint);\ncontext.set('lastUpdateTime', currentTime);\n\nmsg.payload = newSetPoint;\nmsg.originalTarget = targetSetPoint;\nmsg.smoothed = true;\n\n// Status\nlet power_kW = Math.abs(newSetPoint / 1000).toFixed(1);\nlet targetPower_kW = Math.abs(targetSetPoint / 1000).toFixed(1);\nlet direction = newSetPoint < 0 ? \"Export\" : \"Zero\";\n\nnode.status({\n    fill: newSetPoint < 0 ? \"green\" : \"grey\",\n    shape: Math.abs(newSetPoint - targetSetPoint) > 100 ? \"ring\" : \"dot\",\n    text: `${direction}: ${power_kW}kW → Target: ${targetPower_kW}kW`\n});\n\n// Debug pentru schimbări mari\nif (difference > 1000) {\n    node.warn(`Smooth: ${(lastSetPoint/1000).toFixed(1)}kW → ${(newSetPoint/1000).toFixed(1)}kW (Target: ${targetPower_kW}kW)`);\n}\n\nreturn msg;",
+        "outputs": 1,
+        "timeout": "",
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 790,
+        "y": 1320,
+        "wires": [
+            [
+                "56a28fd3cae94337",
+                "0caa8ddaea41b37c"
+            ]
+        ]
+    },
+    {
+        "id": "56a28fd3cae94337",
+        "type": "victron-output-ess",
+        "z": "fbae6d16d556cf55",
+        "g": "a999428c474fd4b7",
+        "service": "com.victronenergy.settings",
+        "path": "/Settings/CGwacs/AcPowerSetPoint",
+        "serviceObj": {
+            "service": "com.victronenergy.settings",
+            "name": "Venus settings"
+        },
+        "pathObj": {
+            "path": "/Settings/CGwacs/AcPowerSetPoint",
+            "type": "integer",
+            "name": "Grid set-point (W)",
+            "mode": "both"
+        },
+        "name": "Set Grid Point",
+        "onlyChanges": false,
+        "x": 1160,
+        "y": 1320,
+        "wires": []
+    },
+    {
+        "id": "0caa8ddaea41b37c",
+        "type": "function",
+        "z": "fbae6d16d556cf55",
+        "g": "a999428c474fd4b7",
+        "name": "Log Grid Changes",
+        "func": "// Logam schimbarile pentru monitorizare si debugging\nif (!msg.gridControl) {\n    node.warn(\"Lipseste gridControl din mesaj\");\n    return null;\n}\n\nlet logEntry = {\n    timestamp: new Date().toISOString(),\n    solar_W: msg.gridControl.solar_W,\n    solar_kW: msg.gridControl.solar_kW,\n    exportPower: msg.gridControl.exportPower,\n    exportPercent: msg.gridControl.exportPercent,\n    consumLocal: msg.gridControl.consumLocal,\n    targetSetPoint: msg.originalTarget,\n    actualSetPoint: msg.payload,\n    direction: msg.payload < 0 ? \"export\" : msg.payload > 0 ? \"import\" : \"zero\",\n    power_kW: Math.abs(msg.payload / 1000).toFixed(2),\n    smoothed: msg.smoothed\n};\n\n// Obtinem istoricul sau cream unul nou\nlet history = global.get('grid_control_history') || [];\n\n// Adaugam noua intrare doar daca avem o schimbare semnificativa (>100W)\nlet lastEntry = history[0];\nif (!lastEntry || Math.abs(lastEntry.actualSetPoint - msg.payload) > 100) {\n    history.unshift(logEntry);\n    \n    // Pastram doar ultimele 100 de intrari\n    if (history.length > 100) {\n        history = history.slice(0, 100);\n    }\n    \n    global.set('grid_control_history', history);\n}\n\n// Pentru debugging - afisam raportul complet\nlet localConsumption_kW = (msg.gridControl.consumLocal / 1000).toFixed(1);\nlet exportPower_kW = (msg.gridControl.exportPower / 1000).toFixed(1);\n\nnode.status({\n    fill: msg.payload < 0 ? \"green\" : \"grey\",\n    shape: \"ring\",\n    text: `PV: ${logEntry.solar_kW}kW | Export: ${exportPower_kW}kW (${msg.gridControl.exportPercent}%) | Local: ${localConsumption_kW}kW`\n});\n\n// Pregatim pentru InfluxDB sau alt sistem de monitorizare\nmsg.measurement = \"grid_control\";\nmsg.fields = {\n    solar_power: msg.gridControl.solar_W,\n    export_power: msg.gridControl.exportPower,\n    local_consumption: msg.gridControl.consumLocal,\n    export_percentage: msg.gridControl.exportPercent,\n    grid_setpoint: msg.payload,\n    grid_export: msg.payload < 0 ? Math.abs(msg.payload) : 0,\n    grid_import: msg.payload > 0 ? msg.payload : 0\n};\nmsg.tags = {\n    system: \"adaptive_control\",\n    location: \"main\",\n    direction: logEntry.direction\n};\n\nreturn msg;",
+        "outputs": 1,
+        "timeout": "",
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 1050,
+        "y": 1220,
+        "wires": [
+            []
+        ]
+    },
+    {
+        "id": "a8aa10c65a3314b3",
+        "type": "inject",
+        "z": "fbae6d16d556cf55",
+        "g": "a999428c474fd4b7",
+        "name": "Set starting point -10kW",
+        "props": [
+            {
+                "p": "payload"
+            }
+        ],
+        "repeat": "",
+        "crontab": "",
+        "once": true,
+        "onceDelay": 0.1,
+        "topic": "",
+        "payload": "10000",
+        "payloadType": "num",
+        "x": 210,
+        "y": 1220,
+        "wires": [
+            [
+                "70d462996ba67653"
+            ]
+        ]
+    },
+    {
+        "id": "70d462996ba67653",
+        "type": "function",
+        "z": "fbae6d16d556cf55",
+        "g": "a999428c474fd4b7",
+        "name": "Set starting point",
+        "func": "// Setam limita maxima de export permisa de retea\nlet maxExport = msg.payload || 10000;\nglobal.set('max_grid_export', maxExport);\n\nnode.status({\n    fill: \"green\",\n    shape: \"dot\",\n    text: `Max Grid Limit: ${(maxExport/1000).toFixed(1)}kW`\n});\n\nnode.warn(`Limita retea setata la: ${maxExport}W (${(maxExport/1000).toFixed(1)}kW)`);\n\nreturn msg;",
+        "outputs": 1,
+        "timeout": "",
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 570,
+        "y": 1220,
+        "wires": [
+            []
+        ]
+    },
+    {
+        "id": "9bc73866940d7161",
+        "type": "link in",
+        "z": "fbae6d16d556cf55",
+        "g": "a999428c474fd4b7",
+        "name": "grid_sepoint_in",
+        "links": [
+            "dcb9361f0cd8312c"
+        ],
+        "x": 95,
+        "y": 1320,
+        "wires": [
+            [
+                "0ac36a8097f78435"
+            ]
+        ]
+    }
+]

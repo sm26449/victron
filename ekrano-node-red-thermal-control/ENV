@@ -1,0 +1,64 @@
+# Example Configuration for Thermal Control Flow
+# Copy the values below and paste them into the "Set Configuration" function node
+
+# ==============================================================================
+# TUYA AC DEVICE CREDENTIALS
+# ==============================================================================
+# Get these from https://iot.tuya.com/ after linking your Smart Life account
+
+TUYA_DEVICE_ID=your_device_id_here
+TUYA_LOCAL_KEY=your_local_key_here
+TUYA_DEVICE_IP=192.168.x.x
+TUYA_PROTOCOL_VERSION=3.3
+
+# ==============================================================================
+# TUYA BRIDGE API
+# ==============================================================================
+# The bridge that translates HTTP requests to Tuya local protocol
+# Example projects: tuyalocal, localtuya, tuya-local
+
+BRIDGE_URL=http://192.168.x.x:8080
+
+# ==============================================================================
+# TELEGRAM NOTIFICATIONS
+# ==============================================================================
+# Create a bot via @BotFather and get your chat ID
+
+TELEGRAM_BOT_TOKEN=1234567890:ABCdefGHIjklMNOpqrsTUVwxyz
+TELEGRAM_CHAT_ID=123456789
+
+# ==============================================================================
+# INFLUXDB
+# ==============================================================================
+# InfluxDB 2.x connection details
+
+INFLUXDB_URL=http://192.168.x.x:8086
+INFLUXDB_ORG=home
+INFLUXDB_BUCKET=thermal_control
+INFLUXDB_TOKEN=your_influxdb_token_here
+
+# ==============================================================================
+# VICTRON SERVICES (adjust to match your GX device)
+# ==============================================================================
+# Find your service names in Remote Console → Settings → Services
+
+BATTERY_SERVICE=com.victronenergy.battery/512
+BATTERY_PATH=/Dc/0/Temperature
+
+TEMP_INSIDE_SERVICE=com.victronenergy.temperature/22
+TEMP_OUTSIDE_SERVICE=com.victronenergy.temperature/23
+
+# ==============================================================================
+# TEMPERATURE THRESHOLDS (adjust to your battery specifications)
+# ==============================================================================
+
+BATTERY_TARGET=24.5
+BATTERY_TOLERANCE=2.0
+BATTERY_CRITICAL_HOT=30
+BATTERY_CRITICAL_COLD=18
+BATTERY_WARNING_HOT=28
+BATTERY_WARNING_COLD=20
+
+ROOM_MIN=20
+ROOM_MAX=26
+ROOM_COMFORT=23
