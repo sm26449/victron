@@ -1,0 +1,40 @@
+[general]
+# Logging level: DEBUG, INFO, WARNING, ERROR
+log_level = INFO
+# Log file path (optional, leave empty to disable file logging)
+log_file =
+
+[serial]
+# Serial port for Seplos BMS RS485 connection
+port = /dev/ttyUSB0
+# Baud rate (default 19200 for Seplos V3)
+baudrate = 19200
+
+[mqtt]
+# MQTT Broker settings
+server = localhost
+port = 1883
+username = your_mqtt_user
+password = your_mqtt_password
+# Topic prefix for all MQTT messages
+prefix = seplos
+# Publish mode: 'changed' (only when values change) or 'all' (every update)
+publish_mode = changed
+
+[influxdb]
+# Enable InfluxDB integration
+enabled = false
+url = http://localhost:8086
+token = your-influxdb-token
+org = your-org
+bucket = seplos
+# Minimum interval between writes per battery (seconds)
+write_interval = 5
+# Publish mode: 'changed' (only when values change) or 'all' (every interval)
+publish_mode = changed
+
+[health]
+# Health check interval in seconds (0 to disable)
+check_interval = 60
+# Stale data timeout in seconds (mark battery offline if no data)
+stale_timeout = 120

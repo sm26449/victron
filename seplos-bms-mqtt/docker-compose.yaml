@@ -1,0 +1,23 @@
+#######################################
+# Seplos BMS MQTT - Standalone docker-compose
+# For use without pv-stack integration
+#######################################
+
+version: "3.8"
+
+services:
+  seplos-bms-mqtt:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: seplos-bms-mqtt:v2.4
+    container_name: seplos-bms-mqtt
+    restart: unless-stopped
+    network_mode: host
+    devices:
+      - /dev/ttyUSB0:/dev/ttyUSB0
+    volumes:
+      - ./seplos_bms_mqtt.ini:/app/seplos_bms_mqtt.ini:ro
+    # Uncomment if you want to use bridge network instead of host
+    # ports:
+    #   - "1883:1883"  # Only needed if running local MQTT

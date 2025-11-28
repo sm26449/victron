@@ -1,0 +1,45 @@
+#######################################
+# Seplos BMS MQTT - PV-Stack Integration
+# Add this service to your docker-compose.pv-stack.yml
+#######################################
+#
+# Copy this service definition to your main pv-stack docker-compose file
+# or include it with: docker-compose -f docker-compose.pv-stack.yml -f seplos-bms-mqtt/docker-compose.pv-stack.yaml up -d
+#
+
+services:
+  seplos-bms-mqtt:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: seplos-bms-mqtt:v2.4
+    container_name: pv-stack-seplos
+    restart: unless-stopped
+    labels:
+      - "com.docker.compose.project=pv-stack"
+      - "io.portainer.accesscontrol.teams=pv-stack"
+    # Use host network for access to serial port and local services
+    network_mode: host
+    devices:
+      - /dev/ttyUSB0:/dev/ttyUSB0
+    volumes:
+      - ${DOCKER_ROOT:-/opt/docker}/pv-stack/seplos/config/seplos_bms_mqtt.ini:/app/seplos_bms_mqtt.ini:ro
+    depends_on:
+      - mosquitto
+      - influxdb
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import socket; s=socket.socket(); s.settimeout(5); exit(0)"]
+      interval: 60s
+      timeout: 10s
+      start_period: 30s
+      retries: 3
+
+# Note: This file is meant to be merged with your main pv-stack compose file
+# The network is inherited from the parent compose file
+
+# Required setup:
+# 1. Create config directory: mkdir -p ${DOCKER_ROOT}/pv-stack/seplos/config
+# 2. Copy config file: cp seplos_bms_mqtt.ini ${DOCKER_ROOT}/pv-stack/seplos/config/
+# 3. Edit config with your MQTT and InfluxDB settings
+# 4. Build image: docker-compose -f docker-compose.pv-stack.yaml build
+# 5. Start: docker-compose -f docker-compose.pv-stack.yml -f docker-compose.pv-stack.yaml up -d seplos-bms-mqtt

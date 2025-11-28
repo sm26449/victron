@@ -1,0 +1,6 @@
+# Seplos BMS MQTT Dependencies
+# Pin major versions for stability and security
+
+pyserial>=3.5,<4.0
+paho-mqtt>=2.0,<3.0
+influxdb-client>=1.36,<2.0
