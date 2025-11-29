@@ -37,14 +37,18 @@ class SerialSnooper:
         signal.signal(signal.SIGINT, self.signal_handler)
         signal.signal(signal.SIGTERM, self.signal_handler)
 
-        self.log.info(f"Opening serial interface, port: {port} {baudrate} 8N1 timeout: 0.001750")
+        # Timeout optimizat: 0.1s reduce consumul CPU semnificativ
+        # La 19200 baud, un frame Modbus de 100 bytes ia ~52ms
+        # Timeout de 100ms permite acumularea datelor și reduce ciclurile idle
+        self.serial_timeout = 0.1
+        self.log.info(f"Opening serial interface, port: {port} {baudrate} 8N1 timeout: {self.serial_timeout}")
         self.connection = serial.Serial(
             port=port,
             baudrate=baudrate,
             bytesize=serial.EIGHTBITS,
             parity=serial.PARITY_NONE,
             stopbits=serial.STOPBITS_ONE,
-            timeout=0.001750
+            timeout=self.serial_timeout
         )
         self.log.debug(self.connection)
 
@@ -60,7 +64,13 @@ class SerialSnooper:
     def close(self):
         self.connection.close()
 
-    def read_raw(self, n=1):
+    def read_raw(self, n=256):
+        """Citește până la n bytes din buffer-ul serial.
+
+        Optimizare CPU: citim un bloc mai mare în loc de byte cu byte.
+        La timeout (fără date), returnează bytes gol, permițând procesarea
+        datelor acumulate în buffer.
+        """
         return self.connection.read(n)
 
     def get_declared_batteries(self):
@@ -432,36 +442,32 @@ class SerialSnooper:
             self.autodiscovery_battery(unitIdentifier)
             self.batts_declared_set.add(unitIdentifier)
 
-        # Cell voltages 1-16 (bytes 0-31)
+        # Cell voltages 1-16 (bytes 0-31) - calculăm o singură dată
+        cell_voltages = []
         for i in range(0, 32, 2):
             celda = round(((readData[i] << 8) | readData[i + 1]) / 1000.0, 3)
-            self.mqtt.publish_if_changed(f"{self.mqtt_prefix}/battery_{unitIdentifier}/cell_{int(i/2)+1}", celda)
+            cell_voltages.append(celda)
+            cell_num = (i // 2) + 1
+            self.mqtt.publish_if_changed(f"{self.mqtt_prefix}/battery_{unitIdentifier}/cell_{cell_num}", celda)
+            self.pack_aggregator.update_battery_data(unitIdentifier, f'cell_{cell_num}', celda)
 
-        # Cell temperatures 1-4 (bytes 32-39)
+        # Cell temperatures 1-4 (bytes 32-39) - calculăm o singură dată
         for i in range(4):
             temp_raw = (readData[32 + i*2] << 8) | readData[33 + i*2]
             temp_celsius = round(temp_raw / 10.0 - 273.15, 1)
             self.mqtt.publish_if_changed(f"{self.mqtt_prefix}/battery_{unitIdentifier}/cell_temp_{i+1}", temp_celsius)
+            self.pack_aggregator.update_battery_data(unitIdentifier, f'cell_temp_{i+1}', temp_celsius)
 
         # Ambient temperature (bytes 48-49)
         ambient_raw = (readData[48] << 8) | readData[49]
         ambient_celsius = round(ambient_raw / 10.0 - 273.15, 1)
         self.mqtt.publish_if_changed(f"{self.mqtt_prefix}/battery_{unitIdentifier}/ambient_temp", ambient_celsius)
+        self.pack_aggregator.update_battery_data(unitIdentifier, 'ambient_temp', ambient_celsius)
 
         # MOSFET temperature (bytes 50-51)
         power_raw = (readData[50] << 8) | readData[51]
         power_celsius = round(power_raw / 10.0 - 273.15, 1)
         self.mqtt.publish_if_changed(f"{self.mqtt_prefix}/battery_{unitIdentifier}/mosfet_temp", power_celsius)
-
-        # Update pack aggregator
-        for i in range(0, 32, 2):
-            celda = round(((readData[i] << 8) | readData[i + 1]) / 1000.0, 3)
-            self.pack_aggregator.update_battery_data(unitIdentifier, f'cell_{int(i/2)+1}', celda)
-        for i in range(4):
-            temp_raw = (readData[32 + i*2] << 8) | readData[33 + i*2]
-            temp_celsius = round(temp_raw / 10.0 - 273.15, 1)
-            self.pack_aggregator.update_battery_data(unitIdentifier, f'cell_temp_{i+1}', temp_celsius)
-        self.pack_aggregator.update_battery_data(unitIdentifier, 'ambient_temp', ambient_celsius)
 
     def _process_main_info(self, unitIdentifier, readData):
         """Process FC04 main information response (36 bytes)"""
@@ -473,60 +479,63 @@ class SerialSnooper:
             self.autodiscovery_battery(unitIdentifier)
             self.batts_declared_set.add(unitIdentifier)
 
-        # Pack Voltage
-        self.mqtt.publish_if_changed(f"{self.mqtt_prefix}/battery_{unitIdentifier}/pack_voltage", round(readDataNumber[0]/100.0, 2))
-        # Current
+        # Pre-calculăm valorile o singură dată pentru a evita duplicarea
+        pack_voltage = round(readDataNumber[0] / 100.0, 2)
         current_decimal = readDataNumber[1] if readDataNumber[1] <= 32767 else readDataNumber[1] - 65536
-        self.mqtt.publish_if_changed(f"{self.mqtt_prefix}/battery_{unitIdentifier}/current", round(current_decimal/100.0, 2))
-        # Remaining Capacity
-        self.mqtt.publish_if_changed(f"{self.mqtt_prefix}/battery_{unitIdentifier}/remaining_capacity", round(readDataNumber[2]/100.0, 2))
-        # Total Capacity
-        self.mqtt.publish_if_changed(f"{self.mqtt_prefix}/battery_{unitIdentifier}/total_capacity", round(readDataNumber[3]/100.0, 2))
-        # Total Discharge Capacity
-        self.mqtt.publish_if_changed(f"{self.mqtt_prefix}/battery_{unitIdentifier}/total_discharge_capacity", readDataNumber[4]*10)
-        # SOC
-        self.mqtt.publish_if_changed(f"{self.mqtt_prefix}/battery_{unitIdentifier}/soc", round(readDataNumber[5]/10.0, 1))
-        # SOH
-        self.mqtt.publish_if_changed(f"{self.mqtt_prefix}/battery_{unitIdentifier}/soh", round(readDataNumber[6]/10.0, 1))
-        # Cycles
-        self.mqtt.publish_if_changed(f"{self.mqtt_prefix}/battery_{unitIdentifier}/cycles", readDataNumber[7])
-        # Average Cell Voltage
-        self.mqtt.publish_if_changed(f"{self.mqtt_prefix}/battery_{unitIdentifier}/average_cell_voltage", round(readDataNumber[8]/1000.0, 3))
-        # Average Cell Temp
-        self.mqtt.publish_if_changed(f"{self.mqtt_prefix}/battery_{unitIdentifier}/average_cell_temp", round(readDataNumber[9]/10.0 - 273.15, 1))
-        # Max Cell Voltage
-        self.mqtt.publish_if_changed(f"{self.mqtt_prefix}/battery_{unitIdentifier}/max_cell_voltage", round(readDataNumber[10]/1000.0, 3))
-        # Min Cell Voltage
-        self.mqtt.publish_if_changed(f"{self.mqtt_prefix}/battery_{unitIdentifier}/min_cell_voltage", round(readDataNumber[11]/1000.0, 3))
-        # Max Cell Temp
-        self.mqtt.publish_if_changed(f"{self.mqtt_prefix}/battery_{unitIdentifier}/max_cell_temp", round(readDataNumber[12]/10.0 - 273.15, 1))
-        # Min Cell Temp
-        self.mqtt.publish_if_changed(f"{self.mqtt_prefix}/battery_{unitIdentifier}/min_cell_temp", round(readDataNumber[13]/10.0 - 273.15, 1))
-        # MaxDisCurt
-        self.mqtt.publish_if_changed(f"{self.mqtt_prefix}/battery_{unitIdentifier}/maxdiscurt", readDataNumber[15])
-        # MaxChgCurt
-        self.mqtt.publish_if_changed(f"{self.mqtt_prefix}/battery_{unitIdentifier}/maxchgcurt", readDataNumber[16])
-        # Power
-        power = round(-(current_decimal/100.0) * (readDataNumber[0]/100.0))
-        self.mqtt.publish_if_changed(f"{self.mqtt_prefix}/battery_{unitIdentifier}/power", int(power))
-        # Cell Delta
-        self.mqtt.publish_if_changed(f"{self.mqtt_prefix}/battery_{unitIdentifier}/cell_delta", readDataNumber[10] - readDataNumber[11])
+        current = round(current_decimal / 100.0, 2)
+        remaining_capacity = round(readDataNumber[2] / 100.0, 2)
+        total_capacity = round(readDataNumber[3] / 100.0, 2)
+        total_discharge_capacity = readDataNumber[4] * 10
+        soc = round(readDataNumber[5] / 10.0, 1)
+        soh = round(readDataNumber[6] / 10.0, 1)
+        cycles = readDataNumber[7]
+        average_cell_voltage = round(readDataNumber[8] / 1000.0, 3)
+        average_cell_temp = round(readDataNumber[9] / 10.0 - 273.15, 1)
+        max_cell_voltage = round(readDataNumber[10] / 1000.0, 3)
+        min_cell_voltage = round(readDataNumber[11] / 1000.0, 3)
+        max_cell_temp = round(readDataNumber[12] / 10.0 - 273.15, 1)
+        min_cell_temp = round(readDataNumber[13] / 10.0 - 273.15, 1)
+        maxdiscurt = readDataNumber[15]
+        maxchgcurt = readDataNumber[16]
+        power = int(round(-current * pack_voltage))
+        cell_delta = readDataNumber[10] - readDataNumber[11]
 
-        # Update pack aggregator
-        self.pack_aggregator.update_battery_data(unitIdentifier, 'pack_voltage', round(readDataNumber[0]/100.0, 2))
-        self.pack_aggregator.update_battery_data(unitIdentifier, 'current', round(current_decimal/100.0, 2))
-        self.pack_aggregator.update_battery_data(unitIdentifier, 'remaining_capacity', round(readDataNumber[2]/100.0, 2))
-        self.pack_aggregator.update_battery_data(unitIdentifier, 'total_capacity', round(readDataNumber[3]/100.0, 2))
-        self.pack_aggregator.update_battery_data(unitIdentifier, 'soc', round(readDataNumber[5]/10.0, 1))
-        self.pack_aggregator.update_battery_data(unitIdentifier, 'soh', round(readDataNumber[6]/10.0, 1))
-        self.pack_aggregator.update_battery_data(unitIdentifier, 'cycles', readDataNumber[7])
-        self.pack_aggregator.update_battery_data(unitIdentifier, 'max_cell_voltage', round(readDataNumber[10]/1000.0, 3))
-        self.pack_aggregator.update_battery_data(unitIdentifier, 'min_cell_voltage', round(readDataNumber[11]/1000.0, 3))
-        self.pack_aggregator.update_battery_data(unitIdentifier, 'max_cell_temp', round(readDataNumber[12]/10.0 - 273.15, 1))
-        self.pack_aggregator.update_battery_data(unitIdentifier, 'min_cell_temp', round(readDataNumber[13]/10.0 - 273.15, 1))
-        self.pack_aggregator.update_battery_data(unitIdentifier, 'maxdiscurt', readDataNumber[15])
-        self.pack_aggregator.update_battery_data(unitIdentifier, 'maxchgcurt', readDataNumber[16])
-        self.pack_aggregator.update_battery_data(unitIdentifier, 'power', int(power))
+        # Publicăm pe MQTT
+        prefix = f"{self.mqtt_prefix}/battery_{unitIdentifier}"
+        self.mqtt.publish_if_changed(f"{prefix}/pack_voltage", pack_voltage)
+        self.mqtt.publish_if_changed(f"{prefix}/current", current)
+        self.mqtt.publish_if_changed(f"{prefix}/remaining_capacity", remaining_capacity)
+        self.mqtt.publish_if_changed(f"{prefix}/total_capacity", total_capacity)
+        self.mqtt.publish_if_changed(f"{prefix}/total_discharge_capacity", total_discharge_capacity)
+        self.mqtt.publish_if_changed(f"{prefix}/soc", soc)
+        self.mqtt.publish_if_changed(f"{prefix}/soh", soh)
+        self.mqtt.publish_if_changed(f"{prefix}/cycles", cycles)
+        self.mqtt.publish_if_changed(f"{prefix}/average_cell_voltage", average_cell_voltage)
+        self.mqtt.publish_if_changed(f"{prefix}/average_cell_temp", average_cell_temp)
+        self.mqtt.publish_if_changed(f"{prefix}/max_cell_voltage", max_cell_voltage)
+        self.mqtt.publish_if_changed(f"{prefix}/min_cell_voltage", min_cell_voltage)
+        self.mqtt.publish_if_changed(f"{prefix}/max_cell_temp", max_cell_temp)
+        self.mqtt.publish_if_changed(f"{prefix}/min_cell_temp", min_cell_temp)
+        self.mqtt.publish_if_changed(f"{prefix}/maxdiscurt", maxdiscurt)
+        self.mqtt.publish_if_changed(f"{prefix}/maxchgcurt", maxchgcurt)
+        self.mqtt.publish_if_changed(f"{prefix}/power", power)
+        self.mqtt.publish_if_changed(f"{prefix}/cell_delta", cell_delta)
+
+        # Actualizăm pack aggregator cu aceleași valori pre-calculate
+        self.pack_aggregator.update_battery_data(unitIdentifier, 'pack_voltage', pack_voltage)
+        self.pack_aggregator.update_battery_data(unitIdentifier, 'current', current)
+        self.pack_aggregator.update_battery_data(unitIdentifier, 'remaining_capacity', remaining_capacity)
+        self.pack_aggregator.update_battery_data(unitIdentifier, 'total_capacity', total_capacity)
+        self.pack_aggregator.update_battery_data(unitIdentifier, 'soc', soc)
+        self.pack_aggregator.update_battery_data(unitIdentifier, 'soh', soh)
+        self.pack_aggregator.update_battery_data(unitIdentifier, 'cycles', cycles)
+        self.pack_aggregator.update_battery_data(unitIdentifier, 'max_cell_voltage', max_cell_voltage)
+        self.pack_aggregator.update_battery_data(unitIdentifier, 'min_cell_voltage', min_cell_voltage)
+        self.pack_aggregator.update_battery_data(unitIdentifier, 'max_cell_temp', max_cell_temp)
+        self.pack_aggregator.update_battery_data(unitIdentifier, 'min_cell_temp', min_cell_temp)
+        self.pack_aggregator.update_battery_data(unitIdentifier, 'maxdiscurt', maxdiscurt)
+        self.pack_aggregator.update_battery_data(unitIdentifier, 'maxchgcurt', maxchgcurt)
+        self.pack_aggregator.update_battery_data(unitIdentifier, 'power', power)
 
         # Calculate and publish pack aggregate
         self.pack_aggregator.calculate_and_publish()
