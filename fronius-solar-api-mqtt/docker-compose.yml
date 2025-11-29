@@ -1,0 +1,18 @@
+services:
+  fronius-collector:
+    build: .
+    container_name: fronius-solar-api-mqtt
+    restart: unless-stopped
+    volumes:
+      - ./config:/config:ro
+    environment:
+      - FRONIUS_CONFIG=/config/config.yaml
+      - TZ=Europe/Bucharest
+    networks:
+      - default
+    # Optional: if you need to reach services on host network
+    # network_mode: host
+
+networks:
+  default:
+    driver: bridge

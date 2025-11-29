@@ -1,0 +1,14 @@
+# Fronius Collector dependencies
+
+# Core
+pyfronius>=0.8.0
+aiohttp>=3.8.0
+
+# MQTT
+aiomqtt>=2.0.0
+
+# InfluxDB
+influxdb-client>=1.36.0
+
+# Configuration
+pyyaml>=6.0

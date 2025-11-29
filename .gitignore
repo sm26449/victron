@@ -1,0 +1,34 @@
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Claude Code
+.claude/
+CLAUDE.md
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+venv/
+.venv/
+ENV/
+*.egg-info/
+
+# Logs
+*.log
+*.pid
+
+# Local configs with secrets (keep .example files)
+**/config.yaml
+!**/config.example.yaml
+**/fronius_modbus_mqtt.yaml
+!**/fronius_modbus_mqtt.example.yaml

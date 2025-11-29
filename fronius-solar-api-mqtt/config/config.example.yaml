@@ -1,0 +1,62 @@
+# Fronius Collector Configuration
+
+fronius:
+  # Fronius DataManager URL (without trailing slash)
+  host: "http://192.168.1.100"
+  # Inverter IDs (usually 1-4)
+  inverter_ids: [1, 2, 3, 4]
+  # Smart Meter ID (usually 0)
+  meter_id: 0
+  # Polling interval in seconds (for inverters)
+  poll_interval: 10
+  # Fast polling for power_flow and meter (1 second, 0=disabled)
+  poll_interval_fast: 1
+  # Interval for updating inverter_info (status, error)
+  poll_interval_inverter_info: 60
+  # HTTP request timeout (seconds)
+  timeout: 10
+
+mqtt:
+  # Enable/disable MQTT publishing
+  enabled: true
+  host: "192.168.1.50"
+  port: 1883
+  # Credentials (optional)
+  username: ""
+  password: ""
+  # Base topic for publishing
+  base_topic: "fronius"
+  # Use retain for messages
+  retain: true
+  # QoS level (0, 1, or 2)
+  qos: 1
+  # Publish mode: "always" or "on_change"
+  publish_mode: "on_change"
+  # Client ID (optional, auto-generated if empty)
+  client_id: ""
+  # Auto-reconnect delay
+  reconnect_delay: 5
+
+influxdb:
+  # Enable/disable InfluxDB storage
+  enabled: false
+  # InfluxDB v2 URL
+  url: "http://192.168.1.50:8086"
+  # Authentication token
+  token: "your-influxdb-token"
+  # Organization
+  org: "my-org"
+  # Bucket for data
+  bucket: "fronius"
+  # Write mode: "always" or "on_change"
+  write_mode: "on_change"
+  # Batch size for writes
+  batch_size: 100
+  # Flush interval in seconds
+  flush_interval: 10
+
+logging:
+  # Log level: DEBUG, INFO, WARNING, ERROR
+  level: "INFO"
+  # Log file (optional, leave empty for stdout)
+  file: ""

@@ -1,6 +1,6 @@
 # Victron Energy Tools Collection
 
-A collection of Node-RED flows and monitoring configurations for Victron Energy systems, focusing on battery management, thermal control, and data visualization.
+A collection of Node-RED flows, Python services, and monitoring configurations for Victron Energy and Fronius systems, focusing on battery management, thermal control, data visualization, and solar inverter integration.
 
 ## Projects
 
@@ -23,12 +23,43 @@ Complete monitoring pipeline for Victron data visualization.
 - InfluxDB storage with organized measurements
 - Grafana dashboard for real-time monitoring
 
+### [Fronius Modbus MQTT](./fronius-modbus-mqtt/) - Ready for deployment
+Python service for reading Fronius inverter and meter data via Modbus TCP and publishing to MQTT.
+- Modbus TCP communication with Fronius inverters and smart meters
+- MQTT publishing for integration with home automation systems
+- InfluxDB support for data logging
+- Docker ready with production compose files
+- Configurable register mapping
+
+### [Fronius Solar API MQTT](./fronius-solar-api-mqtt/) - Work in progress
+Python service for collecting data from Fronius inverters via Solar API and publishing to MQTT.
+- Solar API V1 integration
+- MQTT publishing
+- InfluxDB support
+- Docker ready
+
+## Documentation
+
+The `docs/` folder contains technical documentation for the supported devices:
+
+### Fronius Documentation (`docs/fronius/`)
+- Solar API V0 and V1 specifications
+- Modbus TCP/RTU protocol documentation
+- Register maps for inverters and meters
+- State codes and event flags reference
+- Smart Meter operating instructions
+
+### Victron Documentation (`docs/victron/`)
+- Wiring diagrams and integration guides
+
 ## Requirements
 
 - Victron Energy GX device (Cerbo GX, Venus GX, etc.)
 - Node-RED (on GX device or separate host)
 - InfluxDB 2.x
 - Grafana (optional, for visualization)
+- Python 3.9+ (for Fronius services)
+- Docker (optional, for containerized deployment)
 
 ## Quick Start
 
@@ -49,13 +80,39 @@ Complete monitoring pipeline for Victron data visualization.
 
 ## License
 
-MIT License - Feel free to use and modify for your own installations.
+MIT License
+
+Copyright (c) 2025 Stefan M
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+## Disclaimer
+
+This software is provided for educational and informational purposes only.
+The author assumes no responsibility for any damages, losses, or issues arising
+from the use of this software. Use at your own risk.
 
 ## Author
 
-**sm26449**
-Email: sm26449@diysolar.ro
+**Stefan M**
+Email: sm24559@diysolar.ro
 
 ---
 
-*Built for the Victron Energy + Node-RED community*
+*Built for the Victron Energy + Fronius + Node-RED community*

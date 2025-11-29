@@ -1,0 +1,63 @@
+# Fronius Collector Configuration
+
+fronius:
+  # URL-ul DataManager-ului Fronius (fără trailing slash)
+  host: "http://192.168.1.100"
+  # ID-urile invertoarelor Symo (de obicei 1-4)
+  inverter_ids: [1, 2, 3, 4]
+  # ID-ul smart meter-ului (de obicei 0)
+  meter_id: 0
+  # Intervalul de polling în secunde (pentru toate datele sau doar invertoare în mod rapid)
+  poll_interval: 10
+  # Polling rapid pentru power_flow și meter (0 = dezactivat, folosește poll_interval pentru toate)
+  # Poate fi setat la 1 secundă pentru date în timp real
+  poll_interval_fast: 0
+  # Intervalul pentru actualizarea inverter_info (status, error codes) - se schimbă rar
+  poll_interval_inverter_info: 60
+  # Timeout pentru cereri HTTP (secunde)
+  timeout: 10
+
+mqtt:
+  # Activează/dezactivează publicarea MQTT
+  enabled: true
+  host: "192.168.1.50"
+  port: 1883
+  # Credențiale (opțional)
+  username: ""
+  password: ""
+  # Topic-ul de bază pentru publicare
+  base_topic: "fronius"
+  # Folosește retain pentru mesaje
+  retain: true
+  # QoS level (0, 1, sau 2)
+  qos: 1
+  # Mod de publicare: "always" sau "on_change"
+  publish_mode: "on_change"
+  # Client ID (opțional, se generează automat dacă e gol)
+  client_id: ""
+  # Reconectare automată
+  reconnect_delay: 5
+
+influxdb:
+  # Activează/dezactivează salvarea în InfluxDB
+  enabled: true
+  # URL-ul InfluxDB v2
+  url: "http://192.168.1.50:8086"
+  # Token de autentificare
+  token: "your-influxdb-token"
+  # Organizația
+  org: "my-org"
+  # Bucket-ul pentru date
+  bucket: "fronius"
+  # Mod de scriere: "always" sau "on_change"
+  write_mode: "on_change"
+  # Batch size pentru scrieri
+  batch_size: 100
+  # Flush interval în secunde
+  flush_interval: 10
+
+logging:
+  # Nivelul de logging: DEBUG, INFO, WARNING, ERROR
+  level: "INFO"
+  # Fișierul de log (opțional, lasă gol pentru stdout)
+  file: ""
