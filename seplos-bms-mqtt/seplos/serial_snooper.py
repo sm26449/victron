@@ -6,6 +6,7 @@ import signal
 import sys
 import serial
 import json
+from datetime import datetime, timezone
 from .logging_setup import get_logger
 from .utils import calc_crc16, to_lower_under
 
@@ -156,6 +157,9 @@ class SerialSnooper:
         self._autodiscovery_sensor("", "measurement", "", "Alarm Cell Undervolt", unitIdentifier)
         self._autodiscovery_sensor("", "measurement", "", "Alarm Cell Overvolt", unitIdentifier)
         self._autodiscovery_sensor("", "measurement", "", "Alarm Cell Temp", unitIdentifier)
+
+        # Last Update timestamp
+        self._autodiscovery_sensor("timestamp", "", "", "Last Update", unitIdentifier)
 
         self.log.info(f"Sending online signal for Battery {unitIdentifier}")
         self.mqtt.publish(f"{self.mqtt_prefix}/battery_{unitIdentifier}/state", "online", retain=True)
@@ -436,6 +440,10 @@ class SerialSnooper:
         self.pack_aggregator.update_battery_data(unitIdentifier, 'protection_count', protection_count)
         self.pack_aggregator.update_battery_data(unitIdentifier, 'balancing_count', balancing_count)
 
+        # Publicăm last_update la fiecare pachet primit (PIC)
+        last_update = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
+        self.mqtt.publish(f"{self.mqtt_prefix}/battery_{unitIdentifier}/last_update", last_update, retain=True)
+
     def _process_cell_info(self, unitIdentifier, readData):
         """Process FC04 cell information response (52 bytes)"""
         if unitIdentifier not in self.batts_declared_set:
@@ -468,6 +476,10 @@ class SerialSnooper:
         power_raw = (readData[50] << 8) | readData[51]
         power_celsius = round(power_raw / 10.0 - 273.15, 1)
         self.mqtt.publish_if_changed(f"{self.mqtt_prefix}/battery_{unitIdentifier}/mosfet_temp", power_celsius)
+
+        # Publicăm last_update la fiecare pachet primit (PIB)
+        last_update = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
+        self.mqtt.publish(f"{self.mqtt_prefix}/battery_{unitIdentifier}/last_update", last_update, retain=True)
 
     def _process_main_info(self, unitIdentifier, readData):
         """Process FC04 main information response (36 bytes)"""
@@ -520,6 +532,10 @@ class SerialSnooper:
         self.mqtt.publish_if_changed(f"{prefix}/maxchgcurt", maxchgcurt)
         self.mqtt.publish_if_changed(f"{prefix}/power", power)
         self.mqtt.publish_if_changed(f"{prefix}/cell_delta", cell_delta)
+
+        # Publicăm last_update mereu (nu publish_if_changed) pentru a ști că funcționează
+        last_update = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
+        self.mqtt.publish(f"{prefix}/last_update", last_update, retain=True)
 
         # Actualizăm pack aggregator cu aceleași valori pre-calculate
         self.pack_aggregator.update_battery_data(unitIdentifier, 'pack_voltage', pack_voltage)
