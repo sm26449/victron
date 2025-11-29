@@ -20,13 +20,14 @@ class MQTTManager:
     - Command subscription for on-demand value requests
     """
 
-    def __init__(self, server, port, username, password, prefix, publish_mode='changed'):
+    def __init__(self, server, port, username, password, prefix, publish_mode='changed', retain=True):
         self.server = server
         self.port = port
         self.username = username
         self.password = password
         self.prefix = prefix
         self.publish_mode = publish_mode
+        self.retain = retain
         self.connected = False
         self.client = None
         self.last_values = {}
@@ -164,10 +165,12 @@ class MQTTManager:
         finally:
             self.connected = False
 
-    def publish(self, topic, value, retain=True):
+    def publish(self, topic, value, retain=None):
         """Publish a message to MQTT (always publishes regardless of mode)"""
         if not self.connected:
             return False
+        if retain is None:
+            retain = self.retain
         try:
             result = self.client.publish(topic, value, retain=retain)
             if result.rc == mqtt.MQTT_ERR_SUCCESS:
@@ -180,8 +183,10 @@ class MQTTManager:
             self.log.error(f"MQTT publish error: {e}")
             return False
 
-    def publish_if_changed(self, topic, value, retain=True):
+    def publish_if_changed(self, topic, value, retain=None):
         """Publish based on publish_mode setting"""
+        if retain is None:
+            retain = self.retain
         if self.publish_mode == 'all':
             # Always publish
             self.messages_published += 1

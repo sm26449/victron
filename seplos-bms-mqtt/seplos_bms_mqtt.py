@@ -66,6 +66,7 @@ def main():
         mqtt_pass = get_config('mqtt', 'password', '')
         mqtt_prefix = get_config('mqtt', 'prefix', 'seplos')
         mqtt_publish_mode = get_config('mqtt', 'publish_mode', 'changed')
+        mqtt_retain = get_config('mqtt', 'retain', 'true').lower() == 'true'
 
         # Health check settings
         health_check_interval = int(get_config('health', 'check_interval', '60'))
@@ -83,12 +84,12 @@ def main():
         # Initialize MQTT Manager
         mqtt_manager = MQTTManager(
             mqtt_server, mqtt_port, mqtt_user, mqtt_pass,
-            mqtt_prefix, mqtt_publish_mode
+            mqtt_prefix, mqtt_publish_mode, mqtt_retain
         )
         if not mqtt_manager.connect():
             log.error("Failed to connect to MQTT broker. Exiting.")
             sys.exit(1)
-        log.info(f"MQTT connected (publish_mode: {mqtt_publish_mode})")
+        log.info(f"MQTT connected (publish_mode: {mqtt_publish_mode}, retain: {mqtt_retain})")
 
         # Initialize InfluxDB Manager (optional)
         if influxdb_enabled and influxdb_url and influxdb_token:
